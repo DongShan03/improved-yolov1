@@ -73,7 +73,7 @@ class YOLOv1(nn.Module):
 
         obj_pred = self.obj_pred(cls_feat)
         cls_pred = self.cls_pred(cls_feat)
-        reg_pred = self.reg_pred(reg_pred)
+        reg_pred = self.reg_pred(reg_feat)
         fmp_size = obj_pred.shape[-2:]
 
         # 对 pred 的size做一些view调整，便于后续的处理
@@ -102,4 +102,29 @@ class YOLOv1(nn.Module):
 
     def forward(self, x, target=None):
         #? 训练时的前向推理代码
-        pass
+        if not self.trainable:
+            return self.inference(x)
+        else:
+            feat = self.backbone(x)
+            feat = self.neck(feat)
+            cls_feat, reg_feat = self.head(feat)
+
+            obj_pred = self.obj_pred(cls_feat)
+            cls_pred = self.cls_pred(cls_feat)
+            reg_pred = self.reg_pred(reg_feat)
+            fmp_size = obj_pred.shape[-2:]
+
+            obj_pred = obj_pred.permute(0, 2, 3, 1).contiguous().flatten(1, 2)
+            cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous().flatten(1, 2)
+            reg_pred = reg_pred.permute(0, 2, 3, 1).contiguous().flatten(1, 2)
+
+            box_pred = self.decode_boxes(reg_pred, fmp_size)
+
+            outputs = {
+                "pred_obj" : obj_pred,
+                "pred_cls" : cls_pred,
+                "pred_box" : box_pred,
+                "stride" : self.stride,
+                "fmp_size" : fmp_size
+            }
+            return outputs
