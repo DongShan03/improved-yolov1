@@ -67,7 +67,38 @@ class YOLOv1(nn.Module):
     @torch.no_grad()
     def inference(self, x):
         #? 测试阶段不涉及反向传播
-        pass
+        feat = self.backbone(x)
+        feat = self.neck(feat)
+        cls_feat, reg_feat = self.head(feat)
+
+        obj_pred = self.obj_pred(cls_feat)
+        cls_pred = self.cls_pred(cls_feat)
+        reg_pred = self.reg_pred(reg_pred)
+        fmp_size = obj_pred.shape[-2:]
+
+        # 对 pred 的size做一些view调整，便于后续的处理
+        # [B, C, H, W] -> [B, H, W, C] -> [B, H*W, C]
+        obj_pred = obj_pred.permute(0, 2, 3, 1).contiguous().flatten(1, 2)
+        cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous().flatten(1, 2)
+        reg_pred = reg_pred.permute(0, 2, 3, 1).contiguous().flatten(1, 2)
+
+        # 测试时，笔者默认batch是1，
+        # 因此，我们不需要用batch这个维度，用[0]将其取走。
+        obj_pred = obj_pred[0]       # [H*W, 1]
+        cls_pred = cls_pred[0]       # [H*W, NC]
+        reg_pred = reg_pred[0]       # [H*W, 4]
+        scores = torch.sqrt(obj_pred.sigmoid() * cls_pred.sigmoid())
+        # 解算边界框, 并归一化边界框: [H*W, 4]
+        bboxes = self.decode_boxes(reg_pred, fmp_size)
+
+        if self.deploy:
+            outputs = torch.cat([bboxes, scores], dim=-1)
+            return outputs
+        else:
+            scores = scores.cpu().numpy()
+            bboxes = bboxes.cpu().numpy()
+            bboxes, scores, labels = self.postprocess(bboxes, scores)
+        return bboxes, scores, labels
 
     def forward(self, x, target=None):
         #? 训练时的前向推理代码
