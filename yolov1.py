@@ -1,6 +1,7 @@
 import torch
-from torch import nn
-
+import torch.nn as nn
+from yolov1_backbone import build_backbone
+from yolov1_config import yolov1_cfg as cfg
 class YOLOv1(nn.Module):
     def __init__(self,
                 cfg,
@@ -27,6 +28,7 @@ class YOLOv1(nn.Module):
         # >>>>>>>>>> Backbone network >>>>>>>>>>>>>>
         #! To do: build our backbone network
         #? self.backbone
+        self.backbone, self.feat_dim = build_backbone(cfg['backbone'], trainable&cfg['pretrained'])
 
         # >>>>>>>>>> Neck network >>>>>>>>>>>>>>
         #! To do: build our neck network
