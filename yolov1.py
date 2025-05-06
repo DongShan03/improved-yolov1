@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from yolov1_backbone import build_backbone
 from yolov1_config import yolov1_cfg as cfg
+from yolov1_neck import build_neck
+from yolov1_head import build_head
 class YOLOv1(nn.Module):
     def __init__(self,
                 cfg,
@@ -28,19 +30,25 @@ class YOLOv1(nn.Module):
         # >>>>>>>>>> Backbone network >>>>>>>>>>>>>>
         #! To do: build our backbone network
         #? self.backbone
-        self.backbone, self.feat_dim = build_backbone(cfg['backbone'], trainable&cfg['pretrained'])
+        self.backbone, feat_dim = build_backbone(cfg['backbone'], trainable&cfg['pretrained'])
 
         # >>>>>>>>>> Neck network >>>>>>>>>>>>>>
         #! To do: build our neck network
         #? self.neck
+        self.neck = build_neck(cfg, feat_dim, out_dim=512)
+        head_dim = self.neck.out_dim
 
         # >>>>>>>>>> Head network >>>>>>>>>>>>>>
         #! To do: build our head network
         #? self.head
+        self.head = build_head(cfg, head_dim, head_dim, num_classes)
 
         # >>>>>>>>>> predict network >>>>>>>>>>>>>>
         #! To do: build our predict network
         #? self.pred
+        self.obj_pred = nn.Conv2d(head_dim, 1, kernel_size=1)
+        self.cls_pred = nn.Conv2d(head_dim, num_classes, kernel_size=1)
+        self.reg_pred = nn.Conv2d(head_dim, 4, kernel_size=1)
 
     def create_grid(self, fmp_size):
         # To do:
