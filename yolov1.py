@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
+import numpy as np
 from yolov1_backbone import build_backbone
 from yolov1_config import yolov1_cfg as cfg
 from yolov1_neck import build_neck
 from yolov1_head import build_head
+from utility import multiclass_nms
 class YOLOv1(nn.Module):
     def __init__(self,
                 cfg,
@@ -54,15 +56,56 @@ class YOLOv1(nn.Module):
         # To do:
         # 生成一个tensor: gridxy, 每个位置的元素是网格的坐标
         # 这个tensor将会在获得边界框参数的时候用到
-        pass
+        # 特征图宽度与高度
+        ws, hs = fmp_size
+        # grid_y, grid_x 都是二维矩阵
+        grid_y, grid_x = torch.meshgrid([torch.arange(hs), torch.arange(ws)])
+        # grid_xy.shape = [grid_x.shape, grid_y.shape, 2]
+        grid_xy = torch.stack([grid_x, grid_y], dim=-1).float()
+        # grid_xy.shape = [grid_x.shape * grid_y.shape, 2]
+        grid_xy = grid_xy.view(-1, 2).to(self.device)
+        return grid_xy
 
     def decode_boxes(self, pred, fmp_size):
         #? 将网络的输出tx, ty, tw, th四个量转换为bbox的(x1, y2), (x2, y2)
-        pass
+        """
+            将txtytwth转换为常用的x1y1x2y2形式。
+        """
+        # 生成网格坐标矩阵
+        grid_cell = self.create_grid(fmp_size)
+        # 计算预测边界框的中心坐标和宽度高度
+        pred_ctr = (torch.sigmoid(pred[..., :2]) + grid_cell) * self.stride
+        pred_wh = torch.exp(pred[..., 2:]) * self.stride
+
+        pred_x1y1 = pred_ctr - pred_wh * 0.5
+        pred_x2y2 = pred_ctr + pred_wh * 0.5
+        pred_box = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
+        return pred_box
 
     def postprocess(self, bboxes, scores):
         #? 后处理代码，包括阈值筛选和非极大值抑制
-        pass
+        """
+            Input:
+                bboxes: [HxW, 4]
+                scores: [HxW, num_classes]
+            Output:
+                bboxes: [N, 4]
+                score:  [N,]
+                labels: [N,]
+        """
+        labels = np.argmax(scores, axis=1)
+        scores = scores[(np.arange(scores.shape[0]), labels)]
+
+        keep = np.where(scores >= self.conf_thresh)
+        bboxes = bboxes[keep]
+        scores = scores[keep]
+        labels = labels[keep]
+
+        #nms
+        scores, labels, bboxes = multiclass_nms(
+            scores, labels, bboxes, self.nms_thresh, self.nms_classes, self.nms_class_agnostic
+        )
+        return bboxes, scores, labels
 
     @torch.no_grad()
     def inference(self, x):
@@ -74,6 +117,7 @@ class YOLOv1(nn.Module):
         obj_pred = self.obj_pred(cls_feat)
         cls_pred = self.cls_pred(cls_feat)
         reg_pred = self.reg_pred(reg_feat)
+        #fmp_size指的是特征图的尺寸
         fmp_size = obj_pred.shape[-2:]
 
         # 对 pred 的size做一些view调整，便于后续的处理
